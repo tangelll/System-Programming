@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <signal.h>
+#include <stdbool.h>
+
 volatile sig_atomic_t keep_running = 1;
 #define SHM_NAME "/my_shared_memory"
 #define SIZE 1024
@@ -17,6 +19,12 @@ char *shared;
 pid_t *client_pids = NULL;
 int client_count = 0;
 
+bool isInList(int pid, int client_pids[],int size){
+	for(int i = 0 ; i < size; i++){
+		if(pid == client_pids[i]){ return true;}
+	}
+	return false;
+}
 void signalHandler(int sig) {
     const char msg[] = "Caught SIGINT\n";
     write(STDOUT_FILENO, msg, sizeof(msg) - 1);
@@ -87,13 +95,21 @@ int main(){
 		if (strlen(buffer) != 0)
 		{
 			buffer[n] = '\0';
-			printf("Message: %s\n",buffer);
 			int pid; 
 			sscanf(buffer, "%*[^0-9]%d", &pid);
-			printf("PID:%d\n", pid);
-			client_pids = realloc(client_pids,(client_count + 1) * sizeof(pid_t));
-			client_pids[client_count] = pid;
-			client_count++;
+			
+			//gelen process yeni mi yoksa sistemde var mi kontrol ediyoruz.
+			if(isInList(pid,client_pids,client_count) && strncmp("Hello Server I am a Client",buffer,26) ){
+				printf("Message: %s\n",buffer);
+			}
+			else
+			{
+				printf("PID:%d\n", pid);
+				client_pids = realloc(client_pids,(client_count + 1) * sizeof(pid_t));
+				client_pids[client_count] = pid;
+				client_count++;
+			
+			}
 			
 		}
 		buffer[0] = '\0';

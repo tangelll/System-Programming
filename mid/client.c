@@ -50,10 +50,12 @@ int main(){
 	
 	memset(message, 0, sizeof(message));	
 	
+	while(1){	
 	scanf("%99s",message);
+	write(fd,message,strlen(message));
+	}
         munmap(shared, SIZE);
         close(fdshared);
-
 	close(fd);
 	return 0;
 }
