@@ -10,9 +10,25 @@
 
 #define SHM_NAME "/my_shared_memory"
 #define SIZE 1024
+int fdshared;
+char *shared;
+
+volatile sig_atomic_t keep_running = 1;
+
+void signalHandler(int sig) {
+    const char msg[] = "Caught SIGINT\n";
+    write(STDOUT_FILENO, msg, sizeof(msg) - 1);
+    keep_running = 0;
+    memset(shared,0,SIZE); 
+    snprintf(shared, SIZE, "I am going to die my pid is %d", getpid());
+
+    //temizlik
+    _exit(sig);
+}
 
 int main(){
-    int fdshared = shm_open(SHM_NAME, O_RDWR, 0666);
+    signal(SIGINT, signalHandler); 
+    fdshared = shm_open(SHM_NAME, O_RDWR, 0666);
     char message[100]={0};
 
     if (fdshared == -1) {
@@ -21,7 +37,7 @@ int main(){
     }
 
     // Memory'yi kendi adres alanına bağla
-    char *shared = mmap(
+    shared = mmap(
         NULL,
         SIZE,
         PROT_READ | PROT_WRITE,
@@ -50,13 +66,13 @@ int main(){
 	
 	memset(message, 0, sizeof(message));	
 	
-	while(1){	
-	scanf("%99s",message);
-	write(fd,message,strlen(message));
+	while(keep_running){	
+	//scanf("%99s",message);
+	    sleep(1);
 	}
-        munmap(shared, SIZE);
-        close(fdshared);
-	close(fd);
+        //munmap(shared, SIZE);
+        //close(fdshared);
+	//close(fd);
 	return 0;
 }
 
