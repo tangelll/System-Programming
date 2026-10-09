@@ -23,6 +23,8 @@ void signalHandler(int sig) {
     snprintf(shared, SIZE, "I am going to die my pid is %d", getpid());
 
     //temizlik
+    munmap(shared, SIZE);
+    close(fdshared);
     _exit(sig);
 }
 
