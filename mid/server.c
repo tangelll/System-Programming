@@ -178,23 +178,29 @@ int main(){
 				       perror("fork");
 			      	 exit(EXIT_FAILURE);
 			   	case 0:
-                     {
-                int my_slot = slot_index;
-                ClientSlot *slot = &shared[my_slot];
-				while(client_alive){
-					pid_t mypid;
-					if (sscanf(slot->message, "I am going to die my pid is %d", &mypid) == 1) {
-					    if (mypid == clientpid) {
-						printf("Benim client kapanıyor: %d\n", clientpid);
-						client_alive = 0;
-					    }
-					}
-				
-				}
-			       	puts("Child exiting.");
-			      	 fflush(stdout);
-			       	_exit(EXIT_SUCCESS);
-                     }
+                {
+				    while(client_alive){
+                        pid_t mypid;
+                        if (sscanf(shared[slot_index].message, "I am going to die my pid is %d", &mypid) == 1) {
+                            if (mypid == clientpid) {
+                            printf("Benim client kapanıyor: %d\n", clientpid);
+                            client_alive = 0;
+                            }
+                        }
+                        else{
+                            if(shared[slot_index].status == 1)
+                            {
+                                printf("%s\n",shared[slot_index].message);
+                                memset(shared[slot_index].message,0,sizeof(shared[slot_index].message));
+                                shared[slot_index].status = 0;
+                            }
+                        }
+                    
+                    }
+                        puts("Child exiting.");
+                         fflush(stdout);
+                        _exit(EXIT_SUCCESS);
+               }
 			   	default:
 			       	printf("Child is PID %jd\n", (intmax_t) childpid);
 				printf("Client is  PID:%d\n", clientpid);

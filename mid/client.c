@@ -111,8 +111,12 @@ int main(){
 
 
 	while(keep_running){	
-	//scanf("%99s",message);
-	    sleep(1);
+        fgets(message, sizeof(message), stdin);
+        memset(shared[my_slot].message,0,sizeof(shared[my_slot].message));
+        snprintf(shared[my_slot].message,
+                 sizeof(shared[my_slot].message),
+                 "%s",message);
+        shared[my_slot].status = 1;
 	}
     munmap(shared, SIZE);
     close(fdshared);
