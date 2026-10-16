@@ -30,7 +30,8 @@ void signalHandler(int sig) {
     const char msg[] = "Caught SIGINT \n";
     write(STDOUT_FILENO, msg, sizeof(msg) - 1);
     keep_running = 0;
-    memset(shared,0,SIZE); 
+    
+    memset(shared[slot_index].message,0,sizeof(shared[slot_index].message));
     snprintf(shared[slot_index].message,sizeof(shared[slot_index].message) ,"I am going to die my pid is %d", getpid());
 
     //temizlik
@@ -89,7 +90,7 @@ int main(){
 	write(fd,message,strlen(message));
 	memset(message, 0, sizeof(message));	
     
-    int slot_index = -1;
+    slot_index = -1;
     sem_wait(ready_sem);
 
     for (int i = 0; i < MAX_CLIENTS; i++) {
