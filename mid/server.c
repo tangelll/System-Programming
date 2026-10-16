@@ -78,15 +78,37 @@ for (int i = 0; i < client_count; i++)
     _exit(sig);
 }
 
-void handle_read_file(char *filename ) {
-    memset(shared[slot_index].message,0,sizeof(shared[slot_index].message));
-    shared[slot_index].status = 0;
+void handle_read_file(char *filename, pid_t clientpid ) {
+    
+    //semaphorlar
+    char sem_write_name[64], sem_read_name[64];
+    snprintf(sem_write_name, sizeof(sem_write_name), "/sem_write_%d", (int)clientpid);
+    snprintf(sem_read_name, sizeof(sem_read_name), "/sem_read_%d", (int)clientpid);
+
+    sem_t *sem_write = sem_open(sem_write_name, 0);
+    sem_t *sem_read = sem_open(sem_read_name, 0);
 
     int fd = open(filename, O_RDONLY);
+
     if (fd == -1) {
-        snprintf(shared[slot_index].message,sizeof(shared[slot_index].message),"%s","ERROR: Dosya bulunamadi veya acilamadi.");
-        shared[slot_index].status = 1;
+
         perror("Dosya acilamadi");
+
+        sem_wait(sem_write);
+
+    memset(shared[slot_index].message, 0,
+           sizeof(shared[slot_index].message));
+
+    snprintf(shared[slot_index].message,
+             sizeof(shared[slot_index].message),
+             "%s", "ERROR: Dosya bulunamadi veya acilamadi.");
+
+    sem_post(sem_read);
+    sem_wait(sem_write);
+
+
+        sem_close(sem_write);
+        sem_close(sem_read);
         return;
     }
 
@@ -102,9 +124,13 @@ void handle_read_file(char *filename ) {
     if (fcntl(fd, F_SETLKW, &lock) == -1) {
         perror("Kilitlenirken hata olustu");
         close(fd);
+        sem_close(sem_write);
+        sem_close(sem_read);
+
         return;
     }
-
+    
+    
 
     // 4. Dosyayı okuma işlemi
     char buffer[256];
@@ -112,7 +138,8 @@ void handle_read_file(char *filename ) {
     while ((bytes_read = read(fd, buffer, sizeof(buffer) - 1)) > 0) {
         buffer[bytes_read] = '\0'; 
        
-        while (shared[slot_index].status == 1)  usleep(500);
+        sem_wait(sem_write);
+
 
 
         memset(shared[slot_index].message, 0, sizeof(shared[slot_index].message));
@@ -120,20 +147,18 @@ void handle_read_file(char *filename ) {
         shared[slot_index].status = 1;
 
 
+        sem_post(sem_read); 
+
     }
 
-    //bu donguler sifir olana kadar bekle demek clientin okudungdan emin olmak icin yapiyoruz bunu
-    while (shared[slot_index].status == 1) {
-        usleep(1000);
-    }
-
+    sem_wait(sem_write);
     memset(shared[slot_index].message, 0, sizeof(shared[slot_index].message));
     snprintf(shared[slot_index].message, sizeof(shared[slot_index].message), "EOF");
-    shared[slot_index].status = 1; 
+    sem_post(sem_read); 
+    sem_wait(sem_write);
 
-    while (shared[slot_index].status == 1) {
-        usleep(1000);
-    }
+    sem_close(sem_write);
+    sem_close(sem_read);
 
     lock.l_type = F_UNLCK; // F_UNLCK: Kilidi açma modu
     fcntl(fd, F_SETLK, &lock); // Kilidi kaldırıyoruz
@@ -259,7 +284,7 @@ int main(){
                                 char filename[100];
                                 if( sscanf(shared[slot_index].message, "readF %99s", filename) == 1 )
                                 {
-                                    handle_read_file(filename);
+                                    handle_read_file(filename,clientpid);
 
                                 }else{
                                 

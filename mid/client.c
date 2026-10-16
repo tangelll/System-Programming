@@ -110,6 +110,13 @@ int main(){
     sem_unlink(sem_name);
 
 
+    char sem_write_name[64], sem_read_name[64];
+    snprintf(sem_write_name, sizeof(sem_write_name), "/sem_write_%d", (int)getpid());
+    snprintf(sem_read_name, sizeof(sem_read_name), "/sem_read_%d", (int)getpid());
+
+    sem_t *sem_write = sem_open(sem_write_name, O_CREAT | O_EXCL, 0666, 0);
+    sem_t *sem_read = sem_open(sem_read_name, O_CREAT | O_EXCL, 0666, 0); 
+
 	while(keep_running){
         fgets(message, sizeof(message), stdin);
         message[strcspn(message, "\n")] = '\0';
@@ -123,35 +130,44 @@ int main(){
 
         if(strncmp(message, "readF", 5) == 0 )
         {
-            printf("Basarili! Blok icine girildi.\n");
-            
-            while (1)
-            {
-                if (shared[slot_index].status == 1) 
-                {
-                    if (strncmp(shared[slot_index].message, "ERROR:", 6) == 0) {
+                sem_post(sem_write);
+                printf("Basarili! Komut Dosya Kontrol ediliyor...\n");
+                    while (1)
+                    {
+                        sem_wait(sem_read);
+
+                        if (strncmp(shared[slot_index].message, "ERROR:", 6) == 0)
+                        {
                             printf("Sunucudan Hata Alindi: %s\n", shared[slot_index].message);
-                            shared[slot_index].status = 0;
+                            fflush(stdout); 
+                            sem_post(sem_write);
                             break; 
-                    }
+                         }
 
-                    if (strncmp(shared[slot_index].message, "EOF", 3) == 0) {
-                        printf("%s\n", shared[slot_index].message);
-                        shared[slot_index].status = 0;
-                        break;
-                    }
-                   
-                    printf("%s\n", shared[slot_index].message);
-                    fflush(stdout);
                     
-                    shared[slot_index].status = 0;
+                        else if (strncmp(shared[slot_index].message, "EOF", 3) == 0) 
+                        {
+                            printf("%s\n", shared[slot_index].message);
+                            sem_post(sem_write);
+                            break;
+                        }
+                        else{
+                            printf("%s\n", shared[slot_index].message);
+                            fflush(stdout);
+                            sem_post(sem_write); 
+                        }
+                   
 
-                }
-                usleep(500);
-            }
+                    }
+
         }
+                       
 
 	}
+
+    sem_close(sem_write); sem_unlink(sem_write_name);
+    sem_close(sem_read); sem_unlink(sem_read_name);
+
     munmap(shared, SIZE);
     close(fdshared);
 	close(fd);
