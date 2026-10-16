@@ -10,6 +10,7 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <semaphore.h>
+#include <fcntl.h>
 
 volatile sig_atomic_t keep_running = 1;
 #define SHM_NAME "/my_shared_memory"
@@ -29,6 +30,7 @@ int fdshared;
 pid_t (*client_pids)[2] = NULL;
 int client_count = 0;
 int server_pid = -1;
+int slot_index = -1;
 
 void child_handler(int sig)
 {
@@ -75,6 +77,70 @@ for (int i = 0; i < client_count; i++)
     shm_unlink(SHM_NAME);
     _exit(sig);
 }
+
+void handle_read_file(char *filename ) {
+    memset(shared[slot_index].message,0,sizeof(shared[slot_index].message));
+    shared[slot_index].status = 0;
+
+    int fd = open(filename, O_RDONLY);
+    if (fd == -1) {
+        snprintf(shared[slot_index].message,sizeof(shared[slot_index].message),"%s","ERROR: Dosya bulunamadi veya acilamadi.");
+        shared[slot_index].status = 1;
+        perror("Dosya acilamadi");
+        return;
+    }
+
+    struct flock lock;
+    memset(&lock, 0, sizeof(lock));
+
+    lock.l_type = F_RDLCK;    // F_RDLCK: Okuma kilidi (Birden fazla süreç aynı anda okuyabilir ama kimse yazamaz)
+    lock.l_whence = SEEK_SET; // Kilidin dosyanın başından başlayacağını belirtir
+    lock.l_start = 0;         // 0. bayttan başla
+    lock.l_len = 0;           // 0 demek "Tüm dosyayı kilitle" demektir
+
+
+    if (fcntl(fd, F_SETLKW, &lock) == -1) {
+        perror("Kilitlenirken hata olustu");
+        close(fd);
+        return;
+    }
+
+
+    // 4. Dosyayı okuma işlemi
+    char buffer[256];
+    ssize_t bytes_read;
+    while ((bytes_read = read(fd, buffer, sizeof(buffer) - 1)) > 0) {
+        buffer[bytes_read] = '\0'; 
+       
+        while (shared[slot_index].status == 1)  usleep(500);
+
+
+        memset(shared[slot_index].message, 0, sizeof(shared[slot_index].message));
+        snprintf(shared[slot_index].message, sizeof(shared[slot_index].message), "%s", buffer);
+        shared[slot_index].status = 1;
+
+
+    }
+
+    //bu donguler sifir olana kadar bekle demek clientin okudungdan emin olmak icin yapiyoruz bunu
+    while (shared[slot_index].status == 1) {
+        usleep(1000);
+    }
+
+    memset(shared[slot_index].message, 0, sizeof(shared[slot_index].message));
+    snprintf(shared[slot_index].message, sizeof(shared[slot_index].message), "EOF");
+    shared[slot_index].status = 1; 
+
+    while (shared[slot_index].status == 1) {
+        usleep(1000);
+    }
+
+    lock.l_type = F_UNLCK; // F_UNLCK: Kilidi açma modu
+    fcntl(fd, F_SETLK, &lock); // Kilidi kaldırıyoruz
+
+    close(fd); 
+}
+
 int main(){
 	char *fifo_path = "salih_fifo";
 	char buffer [100];
@@ -134,7 +200,7 @@ int main(){
 			//gelen process yeni mi yoksa sistemde var mi kontrol ediyoruz.
 			if(0 == strncmp("Hello Server I am a Client",buffer,26)){
 				sscanf(buffer, "%*[^0-9]%d", &clientpid);
-                int slot_index = -1;
+                slot_index = -1;
 
                 for (int i = 0; i < MAX_CLIENTS; i++) {
                     if (shared[i].client_pid == 0) {
@@ -190,9 +256,17 @@ int main(){
                         else{
                             if(shared[slot_index].status == 1)
                             {
+                                char filename[100];
+                                if( sscanf(shared[slot_index].message, "readF %99s", filename) == 1 )
+                                {
+                                    handle_read_file(filename);
+
+                                }else{
+                                
                                 printf("%s\n",shared[slot_index].message);
                                 memset(shared[slot_index].message,0,sizeof(shared[slot_index].message));
                                 shared[slot_index].status = 0;
+                                }
                             }
                         }
                     

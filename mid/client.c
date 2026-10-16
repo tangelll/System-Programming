@@ -22,7 +22,7 @@ typedef struct {
 } ClientSlot;
 
 int fdshared;
-int my_slot = -1;
+int slot_index = -1;
 ClientSlot *shared;
 volatile sig_atomic_t keep_running = 1;
 
@@ -31,7 +31,7 @@ void signalHandler(int sig) {
     write(STDOUT_FILENO, msg, sizeof(msg) - 1);
     keep_running = 0;
     memset(shared,0,SIZE); 
-    snprintf(shared[my_slot].message,sizeof(shared[my_slot].message) ,"I am going to die my pid is %d", getpid());
+    snprintf(shared[slot_index].message,sizeof(shared[slot_index].message) ,"I am going to die my pid is %d", getpid());
 
     //temizlik
     munmap(shared, SIZE);
@@ -94,14 +94,14 @@ int main(){
 
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (shared[i].client_pid == getpid() ) {
-            my_slot = i;
+            slot_index = i;
             printf("kendime ait slotu buldum\n");
             break;
         }
     }
-    if (my_slot != -1) {
-        snprintf(shared[my_slot].message,
-                 sizeof(shared[my_slot].message),
+    if (slot_index != -1) {
+        snprintf(shared[slot_index].message,
+                 sizeof(shared[slot_index].message),
                  "bu shared memoryden ilk mesajimdir");
     } else {
         printf("Kendime ait slotu bulamadim!\n");
@@ -110,13 +110,47 @@ int main(){
     sem_unlink(sem_name);
 
 
-	while(keep_running){	
+	while(keep_running){
         fgets(message, sizeof(message), stdin);
-        memset(shared[my_slot].message,0,sizeof(shared[my_slot].message));
-        snprintf(shared[my_slot].message,
-                 sizeof(shared[my_slot].message),
-                 "%s",message);
-        shared[my_slot].status = 1;
+        message[strcspn(message, "\n")] = '\0';
+        
+        memset(shared[slot_index].message,0,sizeof(shared[slot_index].message));
+        snprintf(shared[slot_index].message,sizeof(shared[slot_index].message),"%s",message);
+        shared[slot_index].status = 1;
+        
+        char filename[100];
+
+
+        if(strncmp(message, "readF", 5) == 0 )
+        {
+            printf("Basarili! Blok icine girildi.\n");
+            
+            while (1)
+            {
+                if (shared[slot_index].status == 1) 
+                {
+                    if (strncmp(shared[slot_index].message, "ERROR:", 6) == 0) {
+                            printf("Sunucudan Hata Alindi: %s\n", shared[slot_index].message);
+                            shared[slot_index].status = 0;
+                            break; 
+                    }
+
+                    if (strncmp(shared[slot_index].message, "EOF", 3) == 0) {
+                        printf("%s\n", shared[slot_index].message);
+                        shared[slot_index].status = 0;
+                        break;
+                    }
+                   
+                    printf("%s\n", shared[slot_index].message);
+                    fflush(stdout);
+                    
+                    shared[slot_index].status = 0;
+
+                }
+                usleep(500);
+            }
+        }
+
 	}
     munmap(shared, SIZE);
     close(fdshared);
