@@ -1,4 +1,4 @@
-pid_t my_pid = getpid();
+denemehhcazd = getpid();
 int my_slot = -1m;
 
 for (int i = 0; i < max_clients; i++) {

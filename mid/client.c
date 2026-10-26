@@ -111,14 +111,22 @@ int main(){
     sem_unlink(sem_name);
 
 
-    char sem_write_name[64], sem_read_name[64];
+    char sem_write_name[64], sem_read_name[64],sem_write_file_name[64];
     snprintf(sem_write_name, sizeof(sem_write_name), "/sem_write_%d", (int)getpid());
     snprintf(sem_read_name, sizeof(sem_read_name), "/sem_read_%d", (int)getpid());
+    snprintf(sem_write_file_name, sizeof(sem_write_file_name), "/sem_write_file_%d", (int)getpid());
 
     sem_t *sem_write = sem_open(sem_write_name, O_CREAT | O_EXCL, 0666, 0);
     sem_t *sem_read = sem_open(sem_read_name, O_CREAT | O_EXCL, 0666, 0); 
+    sem_t *sem_write_file = sem_open(sem_write_file_name, O_CREAT | O_EXCL, 0666, 0); 
+
+    if (sem_write_file == SEM_FAILED) {
+    perror("sem_open");
+    }
 
 	while(keep_running){
+        printf("usage readF <filenam.txt>\n");
+        printf("usaga writeF <filename.txt> <message>\n");
         fgets(message, sizeof(message), stdin);
         message[strcspn(message, "\n")] = '\0';
         
@@ -162,12 +170,18 @@ int main(){
                     }
 
         }
+        else if(strncmp(message, "writeF", 6) == 0 )
+        {
+            sem_wait(sem_write_file);
+            printf("%s\n", shared[slot_index].message);
+        }
                        
 
 	}
 
     sem_close(sem_write); sem_unlink(sem_write_name);
     sem_close(sem_read); sem_unlink(sem_read_name);
+    sem_close(sem_write_file); sem_unlink(sem_write_file_name);
 
     munmap(shared, SIZE);
     close(fdshared);

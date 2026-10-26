@@ -78,6 +78,59 @@ for (int i = 0; i < client_count; i++)
     _exit(sig);
 }
 
+void handle_write_file(char *filename, pid_t clientpid, char *sendedtext ) {
+
+    //semaphorlar
+    char sem_write_file_name[64]; 
+    snprintf(sem_write_file_name, sizeof(sem_write_file_name), "/sem_write_file_%d", (int)clientpid);
+
+    sem_t *sem_write_file = sem_open(sem_write_file_name, 0);
+    
+    int fd = open(filename, O_WRONLY | O_TRUNC );
+    if (fd == -1) {
+        perror("Dosya acilamadi");
+       
+        memset(shared[slot_index].message, 0,
+               sizeof(shared[slot_index].message));
+
+        snprintf(shared[slot_index].message,
+                 sizeof(shared[slot_index].message),
+                 "%s\n", "ERROR: Dosya bulunamadi veya acilamadi.");
+
+        
+        shared[slot_index].status = 0;//yazi yazildi okuma yapma
+
+        sem_post(sem_write_file);
+        sem_close(sem_write_file);
+        return;
+    }
+    struct flock lock;
+    memset(&lock, 0, sizeof(lock));
+    
+    lock.l_type = F_WRLCK;    
+    lock.l_whence = SEEK_SET; 
+    lock.l_start = 0;         
+    lock.l_len = 0;          
+
+
+    if (fcntl(fd, F_SETLKW, &lock) == -1) {
+        perror("Kilitlenirken hata olustu");
+        sem_close(sem_write_file);
+        close(fd);
+        return;
+    }
+
+    shared[slot_index].status = 0;//yazi yazildi okuma yapma
+    write(fd, sendedtext, strlen(sendedtext));
+    memset(shared[slot_index].message, 0, sizeof(shared[slot_index].message));
+    snprintf(shared[slot_index].message, sizeof(shared[slot_index].message), "EOF");
+    sem_post(sem_write_file);
+    lock.l_type = F_UNLCK; // F_UNLCK: Kilidi açma modu
+    fcntl(fd, F_SETLK, &lock); // Kilidi kaldırıyoruz
+    sem_close(sem_write_file);
+    close(fd); 
+}
+ 
 void handle_read_file(char *filename, pid_t clientpid ) {
     
     //semaphorlar
@@ -115,10 +168,10 @@ void handle_read_file(char *filename, pid_t clientpid ) {
     struct flock lock;
     memset(&lock, 0, sizeof(lock));
 
-    lock.l_type = F_RDLCK;    // F_RDLCK: Okuma kilidi (Birden fazla süreç aynı anda okuyabilir ama kimse yazamaz)
-    lock.l_whence = SEEK_SET; // Kilidin dosyanın başından başlayacağını belirtir
-    lock.l_start = 0;         // 0. bayttan başla
-    lock.l_len = 0;           // 0 demek "Tüm dosyayı kilitle" demektir
+    lock.l_type = F_RDLCK;    
+    lock.l_whence = SEEK_SET; 
+    lock.l_start = 0;         
+    lock.l_len = 0;           
 
 
     if (fcntl(fd, F_SETLKW, &lock) == -1) {
@@ -282,11 +335,17 @@ int main(){
                             if(shared[slot_index].status == 1)
                             {
                                 char filename[100];
+                                char sendedtext[256];
                                 if( sscanf(shared[slot_index].message, "readF %99s", filename) == 1 )
                                 {
                                     handle_read_file(filename,clientpid);
 
-                                }else{
+                                }
+                                else if ( sscanf(shared[slot_index].message, "writeF %99s %255[^\n]", filename,sendedtext) == 2)
+                                {
+                                    handle_write_file(filename,clientpid,sendedtext);
+                                }
+                                else{
                                 
                                 printf("%s\n",shared[slot_index].message);
                                 memset(shared[slot_index].message,0,sizeof(shared[slot_index].message));
