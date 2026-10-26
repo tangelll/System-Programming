@@ -31,6 +31,7 @@ pid_t (*client_pids)[2] = NULL;
 int client_count = 0;
 int server_pid = -1;
 int slot_index = -1;
+char *fifo_path = "salih_fifo";
 
 void child_handler(int sig)
 {
@@ -75,6 +76,7 @@ for (int i = 0; i < client_count; i++)
     munmap(shared, SIZE);
     close(fdshared);
     shm_unlink(SHM_NAME);
+    unlink(fifo_path);
     _exit(sig);
 }
 
@@ -220,7 +222,6 @@ void handle_read_file(char *filename, pid_t clientpid ) {
 }
 
 int main(){
-	char *fifo_path = "salih_fifo";
 	char buffer [100];
 	int result = mkfifo(fifo_path,0666);
     signal(SIGINT, signalHandler); 
@@ -228,6 +229,11 @@ int main(){
     server_pid = getpid();
 
     fdshared = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
+
+    if (result == -1){
+        perror("fifo error");
+        return 1;
+    }
     if (fdshared == -1) {
  
         perror("shm_open");

@@ -134,7 +134,6 @@ int main(){
         snprintf(shared[slot_index].message,sizeof(shared[slot_index].message),"%s",message);
         shared[slot_index].status = 1;
         
-        char filename[100];
 
 
         if(strncmp(message, "readF", 5) == 0 )

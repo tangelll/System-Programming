@@ -1,18 +1,1 @@
-denemehhcazd = getpid();
-int my_slot = -1m;
-
-for (int i = 0; i < max_clients; i++) {
-    if (shared[i].client_pid == my_pid) {
-        my_slot = i;
-        break;
-    }
-}
-
-if (my_slot != -1) {
-    snprintf(shared[my_slot].message,
-             sizeof(shared[my_slot].message),
-             "I am going to die my pid is %d",
-             (int)my_pid);
-} else {
-    printf("Kendime ait slotu bulamadim!\n");
-}
+deneme
