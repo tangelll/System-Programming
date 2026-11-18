@@ -9,6 +9,7 @@
 #include <time.h>
 #include <signal.h>
 #include <errno.h>
+#include <pthread.h>
 
 #define BUFFER_SIZE 1024
 

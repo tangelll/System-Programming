@@ -7,6 +7,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <errno.h>
+#include <pthread.h>
 
 #define PORT 8080
 #define MAX_CLIENTS 200
@@ -34,93 +35,25 @@ typedef struct {
     pthread_cond_t cond;
 } Oven;
 
-typedef struct QueueNode {
-    Order order;
-    struct QueueNode *next;
-} QueueNode;
-
-typedef struct {
-    QueueNode *front;
-    QueueNode *rear;
-    int count;
-    int shutdown;
-
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
-} Queue;
-
 typedef struct {
     pthread_t *threads;
     int thread_count;
-    Queue queue;
 } ThreadPool;
 
 ThreadPool cooker_pool;
 ThreadPool delivery_pool;
 Oven my_oven;
 
-
-int queue_pop(Queue *queue, Order *order)
+void *delivery_worker(void *arg)
 {
-    pthread_mutex_lock(&queue->mutex);
+    ThreadPool *pool = arg;
 
-    while (queue->count == 0 && !queue->shutdown)
-    {
-        pthread_cond_wait(&queue->cond, &queue->mutex);
-    }
-
-    if (queue->count == 0 && queue->shutdown)
-    {
-        pthread_mutex_unlock(&queue->mutex);
-        return 0;
-    }
-
-    // Kuyruğun başındaki siparişi al
-    // front ve count değerlerini güncelle
-
-    pthread_mutex_unlock(&queue->mutex);
-    return 1;
-}
-
-void queue_push(Queue *queue, Order order)
-{
-    QueueNode *new_node = malloc(sizeof(QueueNode));
-
-    if (new_node == NULL)
-        return;
-
-    new_node->order = order;
-    new_node->next = NULL;
-
-    pthread_mutex_lock(&queue->mutex);
-
-    if (queue->rear == NULL)
-    {
-        queue->front = new_node;
-        queue->rear = new_node;
-    }
-    else
-    {
-        queue->rear->next = new_node;
-        queue->rear = new_node;
-    }
-
-    queue->count++;
-
-    pthread_cond_signal(&queue->cond);
-
-    pthread_mutex_unlock(&queue->mutex);
+    return NULL;
 }
 
 void *cooker_worker(void *arg)
 {
     ThreadPool *pool = arg;
-    Order order;
-
-    while (queue_pop(&pool->queue, &order))
-    {
-        // Siparişi hazırla
-    }
 
     return NULL;
 }
@@ -167,10 +100,12 @@ void process_message(int fd, char *message)
 
         printf("Client %d, konum: %d %d\n", id, x, y);
 
+
         char response[BUFFER_SIZE];
 
         snprintf(response, sizeof(response),
                  "ORDER_RECEIVED %d\n", id);
+
 
         send_all(fd, response);
     }
@@ -179,23 +114,13 @@ void process_message(int fd, char *message)
     }
 }
 
-void queue_init(Queue *queue)
-{
-    queue->front = NULL;
-    queue->rear = NULL;
-    queue->count = 0;
 
-    pthread_mutex_init(&queue->mutex, NULL);
-    pthread_cond_init(&queue->cond, NULL);
-}
 void oven_init(Oven *oven)
 {
     memset(oven->capacity, 0, sizeof(oven->capacity));
     memset(oven->openings, 0, sizeof(oven->openings));
     memset(oven->kurek, 0, sizeof(oven->kurek));
 
-    pthread_mutex_init(&oven->mutex, NULL);
-    pthread_cond_init(&oven->cond, NULL);
 }
 void thread_pool_init(ThreadPool *pool, int thread_count)
 {
@@ -203,7 +128,16 @@ void thread_pool_init(ThreadPool *pool, int thread_count)
 
     pool->threads = malloc(thread_count * sizeof(pthread_t));
 
-    queue_init(&pool->queue);
+}
+
+void thread_pool_destroy(ThreadPool *pool)
+{
+    for (int i = 0; i < pool->thread_count; i++)
+    {
+        pthread_join(pool->threads[i], NULL);
+    }
+
+    free(pool->threads);
 }
 
 int main(void)
@@ -408,27 +342,6 @@ int main(void)
 
     for (int i = 0; i < MAX_CLIENTS; i++)
         close_client(&clients[i]);
-
-    void thread_pool_destroy(ThreadPool *pool)
-    {
-        pthread_mutex_lock(&pool->queue.mutex);
-
-        pool->queue.shutdown = 1;
-
-        pthread_cond_broadcast(&pool->queue.cond);
-
-        pthread_mutex_unlock(&pool->queue.mutex);
-
-        for (int i = 0; i < pool->thread_count; i++)
-        {
-            pthread_join(pool->threads[i], NULL);
-        }
-
-        free(pool->threads);
-
-        pthread_cond_destroy(&pool->queue.cond);
-        pthread_mutex_destroy(&pool->queue.mutex);
-    }
 
     thread_pool_destroy(&cooker_pool);
     thread_pool_destroy(&delivery_pool);
