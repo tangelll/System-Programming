@@ -19,6 +19,14 @@
 #define OVEN_OPENNINGS 2
 
 volatile sig_atomic_t keep_running = 1;
+char siparis_listesi [200][100] = {0};
+int front = 0;
+int rear = 0;
+int count = 0;
+
+pthread_mutex_t siparis_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t siparis_uyan = PTHREAD_COND_INITIALIZER;
+int siparis_var = 0;
 
 typedef struct {
     int fd;
@@ -31,7 +39,8 @@ typedef struct {
     int openings[OVEN_OPENNINGS];
     int kurek[KUREK_NUM];
 
-    pthread_mutex_t mutex;
+    pthread_mutex_t mutex_oven;
+    pthread_mutex_t mutex_kurek;
     pthread_cond_t cond;
 } Oven;
 
@@ -44,17 +53,64 @@ ThreadPool cooker_pool;
 ThreadPool delivery_pool;
 Oven my_oven;
 
+void siparis_ekle(char *siparis)
+{
+    if (count == 200) {
+        printf("Queue dolu!\n");
+        return;
+    }
+
+    strcpy(siparis_listesi[rear], siparis);
+
+    rear = (rear + 1) % 200;
+    count++;
+}
+
+void siparis_isle()
+{
+    if (count == 0) {
+        printf("Queue bos!\n");
+        return;
+    }
+
+    printf("Islenen siparis: %s\n", siparis_listesi[front]);
+
+    front = (front + 1) % 200;
+    count--;
+}
+
+
 void *delivery_worker(void *arg)
 {
-    ThreadPool *pool = arg;
+    while(keep_running)
+    {
+        pthread_mutex_lock(&siparis_mutex);
 
+        while (siparis_var == 0 && keep_running) {
+            printf("Asci siparis bekliyor...\n");
+            pthread_cond_wait(&siparis_uyan, &siparis_mutex);
+        }
+
+        if (keep_running == 0) {
+            pthread_mutex_unlock(&siparis_mutex);
+            break;
+        }
+        printf("Asci siparisi aldi!\n");
+
+        siparis_var = 0 ;
+
+        pthread_mutex_unlock(&siparis_mutex);
+
+        siparis_isle();
+        usleep(158);
+    }
     return NULL;
 }
 
 void *cooker_worker(void *arg)
 {
     ThreadPool *pool = arg;
-
+    usleep(158);
     return NULL;
 }
 
@@ -100,13 +156,12 @@ void process_message(int fd, char *message)
 
         printf("Client %d, konum: %d %d\n", id, x, y);
 
+        siparis_ekle(message);
+        siparis_var =1;
+        pthread_cond_signal(&siparis_uyan);
 
         char response[BUFFER_SIZE];
-
-        snprintf(response, sizeof(response),
-                 "ORDER_RECEIVED %d\n", id);
-
-
+        snprintf(response, sizeof(response),"ORDER_RECEIVED %d\n", id);
         send_all(fd, response);
     }
     else {
@@ -338,6 +393,15 @@ int main(void)
         }
     }
 
+    if(keep_running == 0)
+    {
+       pthread_mutex_lock(&siparis_mutex);
+
+        pthread_cond_broadcast(&siparis_uyan);
+
+        pthread_mutex_unlock(&siparis_mutex);
+
+    }
     printf("Server shutting down...\n");
 
     for (int i = 0; i < MAX_CLIENTS; i++)
