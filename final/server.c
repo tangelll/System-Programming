@@ -18,6 +18,8 @@
 #define OVEN_CAPACITY 6
 #define OVEN_OPENNINGS 2
 
+
+
 volatile sig_atomic_t keep_running = 1;
 char siparis_listesi [200][100] = {0};
 int front = 0;
@@ -49,9 +51,23 @@ typedef struct {
     int thread_count;
 } ThreadPool;
 
+void siparis_ekle(char *siparis);
+void siparis_isle();
+void *delivery_worker(void *arg);
+void close_client(Client *client);
+void *cooker_worker(void *arg);
+void signalHandler(int sig);
+int send_all(int fd, const char *message);
+void process_message(int fd, char *message);
+void oven_init(Oven *oven);
+void thread_pool_init(ThreadPool *pool, int thread_count);
+void thread_pool_destroy(ThreadPool *pool);
+void print_siparis_listesi();
+
 ThreadPool cooker_pool;
 ThreadPool delivery_pool;
 Oven my_oven;
+Client clients[MAX_CLIENTS];
 
 void siparis_ekle(char *siparis)
 {
@@ -66,14 +82,20 @@ void siparis_ekle(char *siparis)
     count++;
 }
 
+void print_siparis_listesi()
+{
+    printf("siparis listsi");
+    for(int i=0; i < 200; i++)
+    {
+        //printf(" %d",siparis_listesi[i]);
+    }
+}
 void siparis_isle()
 {
     if (count == 0) {
         printf("Queue bos!\n");
-        return;
     }
 
-    printf("Islenen siparis: %s\n", siparis_listesi[front]);
 
     front = (front + 1) % 200;
     count--;
@@ -81,6 +103,14 @@ void siparis_isle()
 
 
 void *delivery_worker(void *arg)
+{
+   
+    return NULL;
+}
+
+
+
+void *cooker_worker(void *arg)
 {
     while(keep_running)
     {
@@ -107,18 +137,6 @@ void *delivery_worker(void *arg)
     return NULL;
 }
 
-void *cooker_worker(void *arg)
-{
-    ThreadPool *pool = arg;
-    usleep(158);
-    return NULL;
-}
-
-void signalHandler(int sig)
-{
-    keep_running = 0;
-}
-
 void close_client(Client *client)
 {
     if (client->fd >= 0) {
@@ -127,6 +145,13 @@ void close_client(Client *client)
         client->used = 0;
     }
 }
+
+void signalHandler(int sig)
+{
+    keep_running = 0;
+}
+
+
 
 /* Tam mesaj gonder */
 int send_all(int fd, const char *message)
@@ -152,7 +177,7 @@ void process_message(int fd, char *message)
 {
     int id, x, y;
 
-    if (sscanf(message, "ORDER %d %d %d", &id, &x, &y) == 3) {
+    if (sscanf(message, "ORDER %d %d %d  ", &id, &x, &y  ) == 3) {
 
         printf("Client %d, konum: %d %d\n", id, x, y);
 
@@ -259,7 +284,6 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-    Client clients[MAX_CLIENTS];
 
     for (int i = 0; i < MAX_CLIENTS; i++) {
         clients[i].fd = -1;
@@ -351,6 +375,7 @@ int main(void)
                     sizeof(temp),
                     0
                 );
+
 
                 if (received <= 0) {
                     printf("Client disconnected: slot %d\n", i);

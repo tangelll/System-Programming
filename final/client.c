@@ -10,7 +10,6 @@
 #include <signal.h>
 #include <errno.h>
 #include <pthread.h>
-
 #define BUFFER_SIZE 1024
 
 typedef struct {
@@ -151,7 +150,7 @@ int main(int argc, char *argv[])
 
         clients[i].order_sent = 1;
 
-        printf("Client %d sent order: (%d, %d)\n",
+        printf("Client %d sent order: (%d   %d )\n",
                clients[i].id,
                clients[i].x,
                clients[i].y);
@@ -253,8 +252,15 @@ int main(int argc, char *argv[])
                 if (received > 0) {
                     buffer[received] = '\0';
 
-                    printf("Client %d received: %s",
-                           clients[i].id, buffer);
+                    //printf("Client %d received: %s", clients[i].id, buffer);
+                    
+
+                    char expected[128];
+                    snprintf(expected, sizeof(expected), "ORDER_RECEIVED %d", numberOfClients);
+
+                    if (strncmp(buffer, expected,17) == 0) {
+                        goto cleanup;
+                    }
                 }
                 else if (received == 0) {
                     printf("Client %d disconnected from server\n",
