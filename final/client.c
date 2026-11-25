@@ -255,9 +255,15 @@ int main(int argc, char *argv[])
                     printf("Client %d received: %s", clients[i].id, buffer);
                     
                     int num;
-                    sscanf(buffer, "ORDER_RECEIVED %d", &num);
-                    if (num == numberOfClients ) {
-                        goto cleanup;
+
+                    int result = sscanf(buffer, "ORDER_DELIVERED %d", &num);
+
+                    if (result == 1) {
+                        printf("Teslim edilen siparis: %d\n", num);
+
+                        if (num == numberOfClients) {
+                            goto cleanup;
+                        }
                     }
                 }
                 else if (received == 0) {

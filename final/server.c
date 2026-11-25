@@ -19,15 +19,23 @@
 
 
 volatile sig_atomic_t keep_running = 1;
-char siparis_listesi [200][100] = {0};
-int front = 0;
-int rear = 0;
-int count = 0;
+
 
 pthread_mutex_t siparis_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t siparis_uyan = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t kurye_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t kurye_uyan = PTHREAD_COND_INITIALIZER;
+
+typedef struct {
+    int client_fd;
+    int order_id;
+    char message[100];
+} Order;
+
+
+
+
+
 int siparis_var = 0;
 int teslimat_var =0;
 
@@ -56,8 +64,8 @@ typedef struct {
     int thread_count;
 } ThreadPool;
 
-void siparis_ekle(char *siparis);
-void siparis_isle();
+void siparis_ekle(int fd, int id, char *siparis);
+void siparis_isle(Order order);
 void *delivery_worker(void *arg);
 void close_client(Client *client);
 void *cooker_worker(void *arg);
@@ -67,72 +75,100 @@ void process_message(int fd, char *message);
 void oven_init(Oven *oven);
 void thread_pool_init(ThreadPool *pool, int thread_count);
 void thread_pool_destroy(ThreadPool *pool);
-void print_siparis_listesi();
 
 ThreadPool cooker_pool;
 ThreadPool delivery_pool;
 Oven my_oven;
 Client clients[MAX_CLIENTS];
-int temp_id;
 
+Order siparis_listesi[200];
 
-void siparis_ekle(char *siparis)
+int front = 0;
+int rear = 0;
+int count = 0;
+
+Order teslimat_listesi[200];
+
+int teslimat_front = 0;
+int teslimat_rear = 0;
+int teslimat_count = 0;
+
+void siparis_ekle(int fd, int id, char *siparis)
 {
+    pthread_mutex_lock(&siparis_mutex);
+
     if (count == 200) {
         printf("Queue dolu!\n");
+        pthread_mutex_unlock(&siparis_mutex);
         return;
     }
 
-    strcpy(siparis_listesi[rear], siparis);
+    siparis_listesi[rear].client_fd = fd;
+    siparis_listesi[rear].order_id = id;
+
+    snprintf(siparis_listesi[rear].message,
+             sizeof(siparis_listesi[rear].message),
+             "%s", siparis);
 
     rear = (rear + 1) % 200;
     count++;
+    siparis_var = 1;
+
+    pthread_cond_signal(&siparis_uyan);
+    pthread_mutex_unlock(&siparis_mutex);
 }
+void siparis_isle(Order order)
+{
+    pthread_mutex_lock(&kurye_mutex);
 
-void print_siparis_listesi()
-{
-    printf("siparis listsi");
-    for(int i=0; i < 200; i++)
-    {
-        //printf(" %d",siparis_listesi[i]);
-    }
-}
-void siparis_isle()
-{
-    if (count == 0) {
-        printf("Queue bos!\n");
+    if (teslimat_count < 200) {
+        teslimat_listesi[teslimat_rear] = order;
+
+        teslimat_rear = (teslimat_rear + 1) % 200;
+        teslimat_count++;
+
+        pthread_cond_signal(&kurye_uyan);
     }
 
-
-    front = (front + 1) % 200;
-    count--;
-    teslimat_var =1;
-    pthread_cond_signal(&kurye_uyan);
+    pthread_mutex_unlock(&kurye_mutex);
 }
 
 
 void *delivery_worker(void *arg)
 {
-    while(keep_running)
+    while (keep_running)
     {
         pthread_mutex_lock(&kurye_mutex);
 
-        while (teslimat_var == 0 && keep_running) {
-            printf("Asci siparis bekliyor...\n");
+        while (teslimat_count == 0 && keep_running) {
             pthread_cond_wait(&kurye_uyan, &kurye_mutex);
         }
 
-        printf("kurye teslimati aldi\n");
-        usleep(158);
-        teslimat_var =0;
-        char response[BUFFER_SIZE];
-        snprintf(response, sizeof(response), "ORDER_RECEIVED %d\n",temp_id);
-        send_all(temp_id, response);
-        printf("kurye gonderdi \n");
+        if (!keep_running) {
+            pthread_mutex_unlock(&kurye_mutex);
+            break;
+        }
+
+        Order order = teslimat_listesi[teslimat_front];
+
+        teslimat_front = (teslimat_front + 1) % 200;
+        teslimat_count--;
+
         pthread_mutex_unlock(&kurye_mutex);
 
+        printf("Kurye %lu no %d numarali siparisi aldi\n",
+               (unsigned long)pthread_self(), order.order_id);
+
+        usleep(158);
+
+        char response[BUFFER_SIZE];
+
+        snprintf(response, sizeof(response),
+                 "ORDER_DELIVERED %d\n", order.order_id);
+
+        send_all(order.client_fd, response);
     }
-   
+
     return NULL;
 }
 
@@ -140,87 +176,118 @@ void *delivery_worker(void *arg)
 
 void *cooker_worker(void *arg)
 {
-    while(keep_running)
+    while (keep_running)
     {
         pthread_mutex_lock(&siparis_mutex);
 
         while (siparis_var == 0 && keep_running) {
-            printf("Asci siparis bekliyor...\n");
             pthread_cond_wait(&siparis_uyan, &siparis_mutex);
         }
 
-        if (keep_running == 0) {
+        if (!keep_running) {
             pthread_mutex_unlock(&siparis_mutex);
             break;
         }
+
+        Order order = siparis_listesi[front];
+
+        front = (front + 1) % 200;
+        count--;
+        siparis_var = (count > 0);
+
+        pthread_mutex_unlock(&siparis_mutex);
+
+        pthread_t tid = pthread_self();
+
+        printf("Asci %lu, %d numarali siparisi aldi!\n",
+               (unsigned long)tid, order.order_id);
+
+        pthread_mutex_lock(&my_oven.mutex_kurek);
+
+        while (my_oven.kurek <= 0 && keep_running) {
+            pthread_cond_wait(&my_oven.cond_kurek,
+                              &my_oven.mutex_kurek);
+        }
+
         if (keep_running == 0) {
             pthread_mutex_unlock(&my_oven.mutex_kurek);
             break;
         }
-        if (keep_running == 0) {
-            pthread_mutex_unlock(&my_oven.mutex_door);
-            break;
-        }
-        if (keep_running == 0) {
-            pthread_mutex_unlock(&my_oven.mutex_capacity);
-            break;
-        }
 
-        pthread_t tid = pthread_self();
-        printf("Asci %lu  siparisi aldi!\n",(unsigned long)tid);
-
-        siparis_var = 0 ;
-
-        pthread_mutex_unlock(&siparis_mutex);
-        
-        //kurek alisverisi
-        pthread_mutex_lock(&my_oven.mutex_kurek);
-        
-        while (my_oven.kurek <= 0 && keep_running) {
-            printf("Asci kurek bekliyor...\n");
-            pthread_cond_wait(&my_oven.cond_kurek, &my_oven.mutex_kurek);
-        }
-        
         my_oven.kurek--;
-        printf("Asci kuregi aldi!\n");
-        usleep(58);
-
-
-
-
-
-        //kapi alisverisi
-        pthread_mutex_lock(&my_oven.mutex_door);
-        while (my_oven.door <= 0 && keep_running) {
-            printf("Asci firin kapisi bekliyor...\n");
-            pthread_cond_wait(&my_oven.cond_door, &my_oven.mutex_door);
-        }
-        my_oven.door--;
-        printf("Asci firin kapisini acti!\n");
-        usleep(58);
-
-
-        pthread_mutex_lock(&my_oven.mutex_capacity);
-        while (my_oven.capacity <= 0 && keep_running) {
-            printf("Asci firin capasitesi azalmasi bekliyor...\n");
-            pthread_cond_wait(&my_oven.cond_capacity, &my_oven.mutex_capacity);
-        }
-        my_oven.capacity--;
-        printf("Asci firini kullaniyor!\n");
-
-        my_oven.door++;
-        my_oven.kurek++;
-        pthread_mutex_unlock(&my_oven.mutex_door);
         pthread_mutex_unlock(&my_oven.mutex_kurek);
 
+        usleep(58);
 
-        siparis_isle();
-        usleep(158);
-        my_oven.capacity++;
+        pthread_mutex_lock(&my_oven.mutex_door);
+
+        while (my_oven.door <= 0 && keep_running) {
+            pthread_cond_wait(&my_oven.cond_door,
+                              &my_oven.mutex_door);
+        }
+
+        if (keep_running == 0) {
+            pthread_mutex_unlock(&my_oven.mutex_door);
+
+            pthread_mutex_lock(&my_oven.mutex_kurek);
+            my_oven.kurek++;
+            pthread_cond_signal(&my_oven.cond_kurek);
+            pthread_mutex_unlock(&my_oven.mutex_kurek);
+
+            break;
+        }
+
+        my_oven.door--;
+        pthread_mutex_unlock(&my_oven.mutex_door);
+
+        usleep(58);
+
+        pthread_mutex_lock(&my_oven.mutex_capacity);
+
+        while (my_oven.capacity <= 0 && keep_running) {
+            pthread_cond_wait(&my_oven.cond_capacity,
+                              &my_oven.mutex_capacity);
+        }
+
+        if (keep_running == 0) {
+            pthread_mutex_unlock(&my_oven.mutex_capacity);
+
+            pthread_mutex_lock(&my_oven.mutex_door);
+            my_oven.door++;
+            pthread_cond_signal(&my_oven.cond_door);
+            pthread_mutex_unlock(&my_oven.mutex_door);
+
+            pthread_mutex_lock(&my_oven.mutex_kurek);
+            my_oven.kurek++;
+            pthread_cond_signal(&my_oven.cond_kurek);
+            pthread_mutex_unlock(&my_oven.mutex_kurek);
+
+            break;
+        }
+
+        my_oven.capacity--;
         pthread_mutex_unlock(&my_oven.mutex_capacity);
 
-                
+        pthread_mutex_lock(&my_oven.mutex_door);
+        my_oven.door++;
+        pthread_cond_signal(&my_oven.cond_door);
+        pthread_mutex_unlock(&my_oven.mutex_door);
+
+        pthread_mutex_lock(&my_oven.mutex_kurek);
+        my_oven.kurek++;
+        pthread_cond_signal(&my_oven.cond_kurek);
+        pthread_mutex_unlock(&my_oven.mutex_kurek);
+
+        usleep(158);
+
+        pthread_mutex_lock(&my_oven.mutex_capacity);
+        my_oven.capacity++;
+        pthread_cond_signal(&my_oven.cond_capacity);
+        pthread_mutex_unlock(&my_oven.mutex_capacity);
+
+        siparis_isle(order);
     }
+
     return NULL;
 }
 
@@ -267,8 +334,7 @@ void process_message(int fd, char *message)
 
     if (sscanf(message, "ORDER %d %d %d  ", &id, &x, &y  ) == 3) {
 
-        temp_id = id;
-        siparis_ekle(message);
+        siparis_ekle(fd, id, message);
         siparis_var = 1;
         pthread_cond_signal(&siparis_uyan);
 
