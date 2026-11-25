@@ -252,13 +252,11 @@ int main(int argc, char *argv[])
                 if (received > 0) {
                     buffer[received] = '\0';
 
-                    //printf("Client %d received: %s", clients[i].id, buffer);
+                    printf("Client %d received: %s", clients[i].id, buffer);
                     
-
-                    char expected[128];
-                    snprintf(expected, sizeof(expected), "ORDER_RECEIVED %d", numberOfClients);
-
-                    if (strncmp(buffer, expected,17) == 0) {
+                    int num;
+                    sscanf(buffer, "ORDER_RECEIVED %d", &num);
+                    if (num == numberOfClients ) {
                         goto cleanup;
                     }
                 }

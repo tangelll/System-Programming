@@ -14,9 +14,7 @@
 #define BUFFER_SIZE 1024
 #define COOKER_COUNT 4
 #define DELIVERY_COUNT 6
-#define KUREK_NUM 3
-#define OVEN_CAPACITY 6
-#define OVEN_OPENNINGS 2
+
 
 
 
@@ -28,7 +26,10 @@ int count = 0;
 
 pthread_mutex_t siparis_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t siparis_uyan = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t kurye_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t kurye_uyan = PTHREAD_COND_INITIALIZER;
 int siparis_var = 0;
+int teslimat_var =0;
 
 typedef struct {
     int fd;
@@ -37,13 +38,17 @@ typedef struct {
 } Client;
 
 typedef struct {
-    int capacity[OVEN_CAPACITY];
-    int openings[OVEN_OPENNINGS];
-    int kurek[KUREK_NUM];
+    int capacity;
+    int door;
+    int kurek;
 
-    pthread_mutex_t mutex_oven;
+    pthread_mutex_t mutex_door;
     pthread_mutex_t mutex_kurek;
-    pthread_cond_t cond;
+    pthread_mutex_t mutex_capacity;
+    pthread_cond_t cond_door;
+    pthread_cond_t cond_kurek;
+    pthread_cond_t cond_capacity;
+
 } Oven;
 
 typedef struct {
@@ -68,6 +73,8 @@ ThreadPool cooker_pool;
 ThreadPool delivery_pool;
 Oven my_oven;
 Client clients[MAX_CLIENTS];
+int temp_id;
+
 
 void siparis_ekle(char *siparis)
 {
@@ -99,11 +106,32 @@ void siparis_isle()
 
     front = (front + 1) % 200;
     count--;
+    teslimat_var =1;
+    pthread_cond_signal(&kurye_uyan);
 }
 
 
 void *delivery_worker(void *arg)
 {
+    while(keep_running)
+    {
+        pthread_mutex_lock(&kurye_mutex);
+
+        while (teslimat_var == 0 && keep_running) {
+            printf("Asci siparis bekliyor...\n");
+            pthread_cond_wait(&kurye_uyan, &kurye_mutex);
+        }
+
+        printf("kurye teslimati aldi\n");
+        usleep(158);
+        teslimat_var =0;
+        char response[BUFFER_SIZE];
+        snprintf(response, sizeof(response), "ORDER_RECEIVED %d\n",temp_id);
+        send_all(temp_id, response);
+        printf("kurye gonderdi \n");
+        pthread_mutex_unlock(&kurye_mutex);
+
+    }
    
     return NULL;
 }
@@ -125,14 +153,73 @@ void *cooker_worker(void *arg)
             pthread_mutex_unlock(&siparis_mutex);
             break;
         }
-        printf("Asci siparisi aldi!\n");
+        if (keep_running == 0) {
+            pthread_mutex_unlock(&my_oven.mutex_kurek);
+            break;
+        }
+        if (keep_running == 0) {
+            pthread_mutex_unlock(&my_oven.mutex_door);
+            break;
+        }
+        if (keep_running == 0) {
+            pthread_mutex_unlock(&my_oven.mutex_capacity);
+            break;
+        }
+
+        pthread_t tid = pthread_self();
+        printf("Asci %lu  siparisi aldi!\n",(unsigned long)tid);
 
         siparis_var = 0 ;
 
         pthread_mutex_unlock(&siparis_mutex);
+        
+        //kurek alisverisi
+        pthread_mutex_lock(&my_oven.mutex_kurek);
+        
+        while (my_oven.kurek <= 0 && keep_running) {
+            printf("Asci kurek bekliyor...\n");
+            pthread_cond_wait(&my_oven.cond_kurek, &my_oven.mutex_kurek);
+        }
+        
+        my_oven.kurek--;
+        printf("Asci kuregi aldi!\n");
+        usleep(58);
+
+
+
+
+
+        //kapi alisverisi
+        pthread_mutex_lock(&my_oven.mutex_door);
+        while (my_oven.door <= 0 && keep_running) {
+            printf("Asci firin kapisi bekliyor...\n");
+            pthread_cond_wait(&my_oven.cond_door, &my_oven.mutex_door);
+        }
+        my_oven.door--;
+        printf("Asci firin kapisini acti!\n");
+        usleep(58);
+
+
+        pthread_mutex_lock(&my_oven.mutex_capacity);
+        while (my_oven.capacity <= 0 && keep_running) {
+            printf("Asci firin capasitesi azalmasi bekliyor...\n");
+            pthread_cond_wait(&my_oven.cond_capacity, &my_oven.mutex_capacity);
+        }
+        my_oven.capacity--;
+        printf("Asci firini kullaniyor!\n");
+
+        my_oven.door++;
+        my_oven.kurek++;
+        pthread_mutex_unlock(&my_oven.mutex_door);
+        pthread_mutex_unlock(&my_oven.mutex_kurek);
+
 
         siparis_isle();
         usleep(158);
+        my_oven.capacity++;
+        pthread_mutex_unlock(&my_oven.mutex_capacity);
+
+                
     }
     return NULL;
 }
@@ -156,6 +243,7 @@ void signalHandler(int sig)
 /* Tam mesaj gonder */
 int send_all(int fd, const char *message)
 {
+
     size_t total = 0;
     size_t length = strlen(message);
 
@@ -179,15 +267,11 @@ void process_message(int fd, char *message)
 
     if (sscanf(message, "ORDER %d %d %d  ", &id, &x, &y  ) == 3) {
 
-        printf("Client %d, konum: %d %d\n", id, x, y);
-
+        temp_id = id;
         siparis_ekle(message);
-        siparis_var =1;
+        siparis_var = 1;
         pthread_cond_signal(&siparis_uyan);
 
-        char response[BUFFER_SIZE];
-        snprintf(response, sizeof(response),"ORDER_RECEIVED %d\n", id);
-        send_all(fd, response);
     }
     else {
         printf("Gecersiz mesaj: %s\n", message);
@@ -195,13 +279,6 @@ void process_message(int fd, char *message)
 }
 
 
-void oven_init(Oven *oven)
-{
-    memset(oven->capacity, 0, sizeof(oven->capacity));
-    memset(oven->openings, 0, sizeof(oven->openings));
-    memset(oven->kurek, 0, sizeof(oven->kurek));
-
-}
 void thread_pool_init(ThreadPool *pool, int thread_count)
 {
     pool->thread_count = thread_count;
@@ -227,7 +304,9 @@ int main(void)
 
     
     // Fırını başlat
-    oven_init(&my_oven);
+    my_oven.door =2;
+    my_oven.kurek =3;
+    my_oven.capacity = 6;
 
     // Thread pool'ları initialize et
     thread_pool_init(&cooker_pool, COOKER_COUNT);
@@ -421,10 +500,14 @@ int main(void)
     if(keep_running == 0)
     {
        pthread_mutex_lock(&siparis_mutex);
+        pthread_mutex_lock(&kurye_mutex);
+
 
         pthread_cond_broadcast(&siparis_uyan);
+        pthread_cond_broadcast(&kurye_uyan);
 
         pthread_mutex_unlock(&siparis_mutex);
+        pthread_mutex_unlock(&kurye_mutex);
 
     }
     printf("Server shutting down...\n");
